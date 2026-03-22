@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -35,6 +36,42 @@ func writeError(w http.ResponseWriter, status int, message string) {
 			"message": message,
 			"type":    "invalid_request_error",
 		},
+	})
+}
+
+type modelObject struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int    `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
+	token := auth.ExtractBearer(r.Header.Get("Authorization"))
+	keyInfo := h.auth.Lookup(token)
+	if keyInfo == nil {
+		writeError(w, http.StatusUnauthorized, "invalid API key")
+		return
+	}
+
+	all := h.router.Aliases()
+	sort.Strings(all)
+	data := make([]modelObject, 0, len(all))
+	for _, name := range all {
+		if keyInfo.AllowsModel(name) {
+			data = append(data, modelObject{
+				ID:      name,
+				Object:  "model",
+				Created: 0,
+				OwnedBy: "actually-lite-llm",
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"object": "list",
+		"data":   data,
 	})
 }
 
