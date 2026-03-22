@@ -79,6 +79,8 @@ All `${}` values are expanded from environment variables at startup.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completion (streaming + non-streaming) |
+| `POST` | `/v1/responses` | OpenAI Responses API (streaming + non-streaming; translates to chat completions internally) |
+| `GET`  | `/v1/models` | List models the caller's API key is permitted to use |
 | `GET`  | `/health` | Liveness/readiness check |
 | `GET`  | `/metrics` | Prometheus metrics |
 
