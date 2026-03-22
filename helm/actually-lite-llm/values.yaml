@@ -1,28 +1,40 @@
+# replicaCount is the number of pod replicas to run.
 replicaCount: 2
 
 image:
+  # image.repository is the container image repository.
   repository: ghcr.io/im0rtality/actually-lite-llm
+  # image.pullPolicy is the image pull policy.
   pullPolicy: IfNotPresent
-  tag: ""  # defaults to Chart.appVersion
+  # image.tag overrides the image tag; defaults to Chart.appVersion when empty.
+  tag: ""
 
 service:
+  # service.type is the Kubernetes Service type.
   type: ClusterIP
+  # service.port is the port the Service exposes.
   port: 8080
 
 resources:
   requests:
+    # resources.requests.cpu is the minimum CPU requested.
     cpu: 50m
+    # resources.requests.memory is the minimum memory requested.
     memory: 64Mi
   limits:
+    # resources.limits.cpu is the maximum CPU allowed.
     cpu: 500m
+    # resources.limits.memory is the maximum memory allowed.
     memory: 128Mi
 
-# Config is mounted from a Secret (recommended) or ConfigMap.
-# Set config.existingSecret to use a pre-existing secret with key "config.yaml".
+# config controls how the application configuration is mounted.
+# Config is mounted from a Secret (recommended) or a pre-existing Secret.
 config:
+  # config.existingSecret is the name of a pre-existing Secret with key "config.yaml".
+  # When set, the inline config below is ignored.
   existingSecret: ""
 
-  # Inline config — used when existingSecret is empty.
+  # config.inline is the inline configuration used when existingSecret is empty.
   # Provider API keys should be injected via existingSecret in production.
   inline: |
     listen: ":8080"
@@ -41,7 +53,8 @@ config:
         provider: "anthropic"
     api_keys: []
 
-# Extra env vars (e.g. to inject OPENAI_API_KEY from a k8s secret)
+# extraEnv is a list of extra environment variables to set on the container,
+# e.g. to inject provider API keys from a Kubernetes Secret.
 extraEnv: []
 # - name: OPENAI_API_KEY
 #   valueFrom:
@@ -49,11 +62,26 @@ extraEnv: []
 #       name: provider-keys
 #       key: openai
 
+serviceAccount:
+  # serviceAccount.create specifies whether a ServiceAccount should be created.
+  create: true
+  # serviceAccount.name is the name of the ServiceAccount to use.
+  # If not set and create is true, a name is generated using the fullname template.
+  name: ""
+  # serviceAccount.annotations are extra annotations to add to the ServiceAccount.
+  annotations: {}
+
 serviceMonitor:
+  # serviceMonitor.enabled controls whether a Prometheus ServiceMonitor is created.
   enabled: false
+  # serviceMonitor.interval is the Prometheus scrape interval.
   interval: 30s
 
+# podAnnotations are extra annotations to add to the pod template.
 podAnnotations: {}
+# nodeSelector constrains pods to nodes with matching labels.
 nodeSelector: {}
+# tolerations allow pods to be scheduled on tainted nodes.
 tolerations: []
+# affinity configures pod scheduling affinity rules.
 affinity: {}
