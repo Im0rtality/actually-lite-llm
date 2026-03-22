@@ -1,0 +1,31 @@
+# Binaries
+actually-lite-llm
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets (use env vars instead)
+config.local.yaml
+.env
+
+# Build output
+/dist/
