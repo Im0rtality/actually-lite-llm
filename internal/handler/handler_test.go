@@ -162,6 +162,71 @@ func TestChatCompletions_OK(t *testing.T) {
 	}
 }
 
+func getModels(h *Handler, authKey string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	if authKey != "" {
+		req.Header.Set("Authorization", "Bearer "+authKey)
+	}
+	w := httptest.NewRecorder()
+	h.Models(w, req)
+	return w
+}
+
+func TestModels_Unauthorized(t *testing.T) {
+	h := makeHandler()
+	w := getModels(h, "bad-key")
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestModels_OK(t *testing.T) {
+	h := makeHandler()
+	w := getModels(h, goodKey)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Object string        `json:"object"`
+		Data   []modelObject `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if resp.Object != "list" {
+		t.Errorf("expected object=list, got %q", resp.Object)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ID != "gpt-4o" {
+		t.Errorf("unexpected models: %+v", resp.Data)
+	}
+}
+
+func TestModels_Restricted(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	a := auth.New([]config.APIKey{
+		{Key: restrictedKey, App: "restricted-app", AllowedModels: []string{"gpt-4o"}},
+	})
+	r := router.New(map[string]config.ModelAlias{
+		"gpt-4o":       {Provider: "openai", Model: "gpt-4o"},
+		"claude-sonnet": {Provider: "anthropic", Model: "claude-sonnet-4-5"},
+	}, nil)
+	h := New(a, r, Providers{}, logger)
+
+	w := getModels(h, restrictedKey)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Data []modelObject `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ID != "gpt-4o" {
+		t.Errorf("expected only gpt-4o, got %+v", resp.Data)
+	}
+}
+
 func TestChatCompletions_Stream(t *testing.T) {
 	h := makeHandler()
 	w := post(h, map[string]interface{}{
