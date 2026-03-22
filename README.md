@@ -179,8 +179,7 @@ go build .
 go vet ./...
 ```
 
-## Roadmap
+## Planned Features
 
-- **v0.1** (current): OpenAI + Anthropic, streaming + non-streaming, virtual keys, Prometheus, Helm chart
-- **v0.2**: Google Gemini provider, config reload on `SIGHUP`
-- **v0.3**: Additional providers (Mistral, Groq, etc.)
+- Google Gemini provider
+- Additional providers (Mistral, Groq, etc.)

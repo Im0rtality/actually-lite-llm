@@ -167,9 +167,7 @@ Environment variables are interpolated at config load time via `os.ExpandEnv`.
 
 **MVP (v0.1)**: Anthropic + OpenAI providers, non-streaming + streaming, virtual keys, Prometheus metrics, Docker image, Helm chart, access logs
 
-**v0.2**: Google Gemini provider, config reload on SIGHUP (zero-downtime config changes)
-
-**v0.3**: Additional providers as needed (Mistral, Groq, etc.) — should be straightforward given the provider interface pattern
+**Planned**: Google Gemini provider, additional providers as needed (Mistral, Groq, etc.) — should be straightforward given the provider interface pattern
 
 ### Technical Risks
 
