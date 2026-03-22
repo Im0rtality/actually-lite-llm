@@ -1,5 +1,5 @@
 # Binaries
-actually-lite-llm
+/actually-lite-llm
 *.exe
 *.dll
 *.so

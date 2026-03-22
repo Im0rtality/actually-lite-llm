@@ -1,0 +1,59 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/im0rtality/actually-lite-llm
+  pullPolicy: IfNotPresent
+  tag: ""  # defaults to Chart.appVersion
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 128Mi
+
+# Config is mounted from a Secret (recommended) or ConfigMap.
+# Set config.existingSecret to use a pre-existing secret with key "config.yaml".
+config:
+  existingSecret: ""
+
+  # Inline config — used when existingSecret is empty.
+  # Provider API keys should be injected via existingSecret in production.
+  inline: |
+    listen: ":8080"
+    providers:
+      openai:
+        api_key: "${OPENAI_API_KEY}"
+      anthropic:
+        api_key: "${ANTHROPIC_API_KEY}"
+    models:
+      gpt-4o: { provider: "openai", model: "gpt-4o" }
+      claude-sonnet: { provider: "anthropic", model: "claude-sonnet-4-20250514" }
+    routing:
+      - prefix: "gpt-"
+        provider: "openai"
+      - prefix: "claude-"
+        provider: "anthropic"
+    api_keys: []
+
+# Extra env vars (e.g. to inject OPENAI_API_KEY from a k8s secret)
+extraEnv: []
+# - name: OPENAI_API_KEY
+#   valueFrom:
+#     secretKeyRef:
+#       name: provider-keys
+#       key: openai
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
