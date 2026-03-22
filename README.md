@@ -12,8 +12,8 @@ LiteLLM does what this does, but it weighs ~800MB at idle and can't track usage 
 - **Multi-provider routing** — alias map + prefix rules route models to OpenAI or Anthropic
 - **Format translation** — Anthropic's Messages API is translated transparently (system prompt extraction, stop sequences, token fields, streaming SSE chunks)
 - **Virtual API keys** — per-app keys defined in YAML; unknown keys get 401, disallowed models get 403
-- **Prometheus metrics** — `llm_requests_total`, `llm_tokens_total`, `llm_request_duration_seconds`, `llm_stream_first_byte_seconds`, `llm_provider_errors_total` — all labeled by `app`, `provider`, `model`
-- **Structured access logs** — JSON via `log/slog`, including app name, provider, model, duration
+- **Prometheus metrics** — `llm_requests_total`, `llm_tokens_total`, `llm_request_duration_seconds`, `llm_stream_first_byte_seconds`, `llm_provider_errors_total`, `llm_cost_dollars_total` — all labeled by `virtual_key`, `provider`, `model`
+- **Structured access logs** — one-liner text via `log/slog`, including virtual key, provider, model, duration
 - **Stateless** — horizontally scalable; no shared state between replicas
 - **Small** — `< 50MB` idle RAM; distroless container image
 
@@ -86,25 +86,54 @@ All `${}` values are expanded from environment variables at startup.
 
 | Metric | Type | Labels |
 |--------|------|--------|
-| `llm_requests_total` | Counter | `app`, `provider`, `model`, `status` |
-| `llm_request_duration_seconds` | Histogram | `app`, `provider`, `model`, `stream` |
-| `llm_tokens_total` | Counter | `app`, `provider`, `model`, `direction` |
-| `llm_stream_first_byte_seconds` | Histogram | `app`, `provider`, `model` |
+| `llm_requests_total` | Counter | `virtual_key`, `provider`, `model`, `status` |
+| `llm_request_duration_seconds` | Histogram | `virtual_key`, `provider`, `model`, `stream` |
+| `llm_tokens_total` | Counter | `virtual_key`, `provider`, `model`, `direction` |
+| `llm_stream_first_byte_seconds` | Histogram | `virtual_key`, `provider`, `model` |
 | `llm_provider_errors_total` | Counter | `provider`, `error_type` |
+| `llm_cost_dollars_total` | Counter | `virtual_key`, `provider`, `model` |
 
-## Kubernetes / Helm
+## Releases
+
+Docker images and Helm charts are published automatically to GHCR on every `v*` tag push.
+
+### Docker
 
 ```bash
-helm install gateway ./helm/actually-lite-llm \
-  --set config.existingSecret=my-gateway-config \
-  --set extraEnv[0].name=OPENAI_API_KEY \
-  --set extraEnv[0].valueFrom.secretKeyRef.name=provider-keys \
-  --set extraEnv[0].valueFrom.secretKeyRef.key=openai
+docker pull ghcr.io/im0rtality/actually-lite-llm:0.1.0
+# or latest patch of a minor
+docker pull ghcr.io/im0rtality/actually-lite-llm:0.1
 ```
 
-Or use inline config via `values.yaml`:
+Run it:
+
+```bash
+docker run -p 8080:8080 \
+  -e OPENAI_API_KEY=sk-... \
+  -v $(pwd)/config.yaml:/etc/actually-lite-llm/config.yaml \
+  ghcr.io/im0rtality/actually-lite-llm:0.1.0 \
+  -config /etc/actually-lite-llm/config.yaml
+```
+
+### Helm chart (OCI)
+
+```bash
+helm install gateway oci://ghcr.io/im0rtality/charts/actually-lite-llm --version 0.1.0
+```
+
+With values:
+
+```bash
+helm install gateway oci://ghcr.io/im0rtality/charts/actually-lite-llm \
+  --version 0.1.0 \
+  --set image.tag=0.1.0 \
+  -f my-values.yaml
+```
+
+Or install from a local values file:
 
 ```yaml
+# my-values.yaml
 config:
   inline: |
     listen: ":8080"
@@ -122,7 +151,17 @@ serviceMonitor:
   interval: 30s
 ```
 
-## Docker
+## Kubernetes / Helm (local chart)
+
+```bash
+helm install gateway ./helm/actually-lite-llm \
+  --set config.existingSecret=my-gateway-config \
+  --set extraEnv[0].name=OPENAI_API_KEY \
+  --set extraEnv[0].valueFrom.secretKeyRef.name=provider-keys \
+  --set extraEnv[0].valueFrom.secretKeyRef.key=openai
+```
+
+## Docker (local build)
 
 ```bash
 docker build -t actually-lite-llm .
