@@ -1,0 +1,30 @@
+listen: ":8080"
+
+providers:
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    base_url: "https://api.openai.com/v1"   # optional, has default
+  anthropic:
+    api_key: "${ANTHROPIC_API_KEY}"
+    base_url: "https://api.anthropic.com/v1" # optional, has default
+
+models:
+  # alias → upstream model + provider
+  "gpt-4o": { provider: "openai", model: "gpt-4o" }
+  "claude-sonnet": { provider: "anthropic", model: "claude-sonnet-4-20250514" }
+  "claude-haiku": { provider: "anthropic", model: "claude-haiku-4-5-20251001" }
+
+routing:
+  # Prefix-based fallback for models not in the alias map
+  - prefix: "gpt-"
+    provider: "openai"
+  - prefix: "claude-"
+    provider: "anthropic"
+
+api_keys:
+  - key: "${VKEY_BACKEND}"
+    app: "my-backend"
+    allowed_models: ["*"]
+  - key: "${VKEY_CHATBOT}"
+    app: "chatbot"
+    allowed_models: ["claude-sonnet", "gpt-4o"]
