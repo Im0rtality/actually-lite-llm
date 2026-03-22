@@ -76,7 +76,7 @@ func (m responsesInputMessage) toChatMessage() (provider.ChatMessage, error) {
 	}
 	var sb strings.Builder
 	for _, p := range parts {
-		if p.Type == "text" {
+		if p.Type == "text" || p.Type == "input_text" {
 			sb.WriteString(p.Text)
 		}
 	}
