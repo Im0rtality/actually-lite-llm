@@ -101,7 +101,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatCompletionRequest, u
 
 func (p *OpenAIProvider) ChatStream(ctx context.Context, req *ChatCompletionRequest, upstreamModel string, w http.ResponseWriter, onFirstByte func()) error {
 	stream := p.client.Chat.Completions.NewStreaming(ctx, buildOpenAIParams(req, upstreamModel))
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
