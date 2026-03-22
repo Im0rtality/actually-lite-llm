@@ -98,6 +98,41 @@ func TestResponses_MessagesInput(t *testing.T) {
 	}
 }
 
+// TestResponses_ContentPartsInput tests content as array of input_text parts (OpenAI spec format).
+func TestResponses_ContentPartsInput(t *testing.T) {
+	h := makeHandler()
+	w := postResponses(h, map[string]interface{}{
+		"model": "gpt-4o",
+		"input": []map[string]interface{}{
+			{"role": "user", "content": []map[string]string{{"type": "input_text", "text": "hello"}}},
+		},
+	}, goodKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp responsesAPIResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Errorf("expected completed, got %q", resp.Status)
+	}
+}
+
+// TestResponses_ContentPartsTextType tests content as array using "text" type (Vercel AI SDK format).
+func TestResponses_ContentPartsTextType(t *testing.T) {
+	h := makeHandler()
+	w := postResponses(h, map[string]interface{}{
+		"model": "gpt-4o",
+		"input": []map[string]interface{}{
+			{"role": "user", "content": []map[string]string{{"type": "text", "text": "hello"}}},
+		},
+	}, goodKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestResponses_Instructions(t *testing.T) {
 	h := makeHandler()
 	w := postResponses(h, map[string]interface{}{
