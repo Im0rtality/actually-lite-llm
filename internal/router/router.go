@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/im0rtality/actually-lite-llm/internal/config"
+	"github.com/im0rtality/actually-lite-llm/internal/pricing"
 )
 
 type Route struct {
@@ -30,21 +31,33 @@ func New(models map[string]config.ModelAlias, routing []config.RoutingRule) *Rou
 func (r *Router) Resolve(model string) (Route, error) {
 	// Check alias map first
 	if alias, ok := r.aliases[model]; ok {
-		return Route{
+		route := Route{
 			Provider:             alias.Provider,
 			UpstreamModel:        alias.Model,
 			CostPerMillionInput:  alias.CostPerMillionInput,
 			CostPerMillionOutput: alias.CostPerMillionOutput,
-		}, nil
+		}
+		if route.CostPerMillionInput == 0 && route.CostPerMillionOutput == 0 {
+			if p, ok := pricing.Defaults[alias.Model]; ok {
+				route.CostPerMillionInput = p.Input
+				route.CostPerMillionOutput = p.Output
+			}
+		}
+		return route, nil
 	}
 
 	// Fall back to prefix rules
 	for _, rule := range r.prefixes {
 		if strings.HasPrefix(model, rule.Prefix) {
-			return Route{
-				Provider:     rule.Provider,
+			route := Route{
+				Provider:      rule.Provider,
 				UpstreamModel: model,
-			}, nil
+			}
+			if p, ok := pricing.Defaults[model]; ok {
+				route.CostPerMillionInput = p.Input
+				route.CostPerMillionOutput = p.Output
+			}
+			return route, nil
 		}
 	}
 
