@@ -227,6 +227,24 @@ func TestModels_Restricted(t *testing.T) {
 	}
 }
 
+func TestNotFound(t *testing.T) {
+	h := makeHandler()
+	req := httptest.NewRequest(http.MethodGet, "/v1/nonexistent", nil)
+	w := httptest.NewRecorder()
+	h.NotFound(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestModels_LogsUnauthorized(t *testing.T) {
+	h := makeHandler()
+	w := getModels(h, "")
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
 func TestChatCompletions_Stream(t *testing.T) {
 	h := makeHandler()
 	w := post(h, map[string]interface{}{

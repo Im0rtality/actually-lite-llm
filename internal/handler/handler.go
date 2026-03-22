@@ -47,10 +47,14 @@ type modelObject struct {
 }
 
 func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	reqID := uuid.New().String()
+
 	token := auth.ExtractBearer(r.Header.Get("Authorization"))
 	keyInfo := h.auth.Lookup(token)
 	if keyInfo == nil {
 		writeError(w, http.StatusUnauthorized, "invalid API key")
+		h.logAccess(r, http.StatusUnauthorized, start, reqID, "", "", "", false)
 		return
 	}
 
@@ -73,6 +77,16 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 		"object": "list",
 		"data":   data,
 	})
+	h.logAccess(r, http.StatusOK, start, reqID, keyInfo.App, "", "", false)
+}
+
+func (h *Handler) NotFound(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusNotFound, "not found")
+	h.logger.Info("access",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"status", http.StatusNotFound,
+	)
 }
 
 func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
