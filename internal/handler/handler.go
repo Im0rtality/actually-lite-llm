@@ -81,7 +81,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app := keyInfo.App
+	vk := keyInfo.App
 	pname := route.Provider
 	model := req.Model
 
@@ -91,7 +91,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		firstByteTime := time.Time{}
 		onFirstByte := func() {
 			firstByteTime = time.Now()
-			metrics.StreamFirstByte.WithLabelValues(app, pname, model).Observe(time.Since(start).Seconds())
+			metrics.StreamFirstByte.WithLabelValues(vk, pname, model).Observe(time.Since(start).Seconds())
 		}
 
 		err = prov.ChatStream(r.Context(), &req, route.UpstreamModel, w, onFirstByte)
@@ -101,13 +101,12 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = firstByteTime
 
-		streamStr := "true"
-		metrics.RequestDuration.WithLabelValues(app, pname, model, streamStr).Observe(time.Since(start).Seconds())
+		metrics.RequestDuration.WithLabelValues(vk, pname, model, "true").Observe(time.Since(start).Seconds())
 		if err != nil {
 			statusCode = http.StatusBadGateway
 		}
-		metrics.RequestsTotal.WithLabelValues(app, pname, model, strconv.Itoa(statusCode)).Inc()
-		h.logAccess(r, statusCode, start, reqID, app, pname, model, true)
+		metrics.RequestsTotal.WithLabelValues(vk, pname, model, strconv.Itoa(statusCode)).Inc()
+		h.logAccess(r, statusCode, start, reqID, vk, pname, model, true)
 	} else {
 		usage, err := prov.Chat(r.Context(), &req, route.UpstreamModel, w)
 		if err != nil {
@@ -116,28 +115,28 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 			statusCode = http.StatusBadGateway
 		}
 		if usage != nil {
-			metrics.TokensTotal.WithLabelValues(app, pname, model, "prompt").Add(float64(usage.PromptTokens))
-			metrics.TokensTotal.WithLabelValues(app, pname, model, "completion").Add(float64(usage.CompletionTokens))
+			metrics.TokensTotal.WithLabelValues(vk, pname, model, "prompt").Add(float64(usage.PromptTokens))
+			metrics.TokensTotal.WithLabelValues(vk, pname, model, "completion").Add(float64(usage.CompletionTokens))
 			if route.CostPerMillionInput > 0 || route.CostPerMillionOutput > 0 {
 				cost := float64(usage.PromptTokens)*route.CostPerMillionInput/1_000_000 +
 					float64(usage.CompletionTokens)*route.CostPerMillionOutput/1_000_000
-				metrics.CostTotal.WithLabelValues(app, pname, model).Add(cost)
+				metrics.CostTotal.WithLabelValues(vk, pname, model).Add(cost)
 			}
 		}
-		metrics.RequestDuration.WithLabelValues(app, pname, model, "false").Observe(time.Since(start).Seconds())
-		metrics.RequestsTotal.WithLabelValues(app, pname, model, strconv.Itoa(statusCode)).Inc()
-		h.logAccess(r, statusCode, start, reqID, app, pname, model, false)
+		metrics.RequestDuration.WithLabelValues(vk, pname, model, "false").Observe(time.Since(start).Seconds())
+		metrics.RequestsTotal.WithLabelValues(vk, pname, model, strconv.Itoa(statusCode)).Inc()
+		h.logAccess(r, statusCode, start, reqID, vk, pname, model, false)
 	}
 }
 
-func (h *Handler) logAccess(r *http.Request, status int, start time.Time, reqID, app, prov, model string, stream bool) {
+func (h *Handler) logAccess(r *http.Request, status int, start time.Time, reqID, virtualKey, prov, model string, stream bool) {
 	h.logger.Info("access",
 		"request_id", reqID,
 		"method", r.Method,
 		"path", r.URL.Path,
 		"status", status,
 		"duration_ms", time.Since(start).Milliseconds(),
-		"app", app,
+		"virtual_key", virtualKey,
 		"provider", prov,
 		"model", model,
 		"stream", stream,

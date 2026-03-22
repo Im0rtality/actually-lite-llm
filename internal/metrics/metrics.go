@@ -9,24 +9,24 @@ var (
 	RequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "llm_requests_total",
 		Help: "Total number of LLM requests.",
-	}, []string{"app", "provider", "model", "status"})
+	}, []string{"virtual_key", "provider", "model", "status"})
 
 	RequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "llm_request_duration_seconds",
 		Help:    "Request duration in seconds.",
 		Buckets: prometheus.DefBuckets,
-	}, []string{"app", "provider", "model", "stream"})
+	}, []string{"virtual_key", "provider", "model", "stream"})
 
 	TokensTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "llm_tokens_total",
 		Help: "Total tokens processed.",
-	}, []string{"app", "provider", "model", "direction"})
+	}, []string{"virtual_key", "provider", "model", "direction"})
 
 	StreamFirstByte = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "llm_stream_first_byte_seconds",
 		Help:    "Time to first byte for streaming requests.",
 		Buckets: prometheus.DefBuckets,
-	}, []string{"app", "provider", "model"})
+	}, []string{"virtual_key", "provider", "model"})
 
 	ProviderErrors = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "llm_provider_errors_total",
@@ -36,5 +36,5 @@ var (
 	CostTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "llm_cost_dollars_total",
 		Help: "Estimated cost in US dollars based on config-defined per-model pricing. Only populated for non-streaming requests and models with pricing configured.",
-	}, []string{"app", "provider", "model"})
+	}, []string{"virtual_key", "provider", "model"})
 )
