@@ -13,16 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-      - name: Run golangci-lint
-        run: golangci-lint run ./...
+          version-file: .golangci-lint-version
 
   test:
     name: Test
