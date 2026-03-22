@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,6 +55,34 @@ type responsesAPIResponse struct {
 	Usage     responsesUsage        `json:"usage"`
 }
 
+// responsesInputMessage is a message in the Responses API input array.
+// Content can be a string or an array of content parts (e.g. Vercel AI SDK sends the latter).
+type responsesInputMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+func (m responsesInputMessage) toChatMessage() (provider.ChatMessage, error) {
+	var text string
+	if json.Unmarshal(m.Content, &text) == nil {
+		return provider.ChatMessage{Role: m.Role, Content: text}, nil
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(m.Content, &parts); err != nil {
+		return provider.ChatMessage{}, fmt.Errorf("unsupported content format")
+	}
+	var sb strings.Builder
+	for _, p := range parts {
+		if p.Type == "text" {
+			sb.WriteString(p.Text)
+		}
+	}
+	return provider.ChatMessage{Role: m.Role, Content: sb.String()}, nil
+}
+
 func parseResponsesInput(raw json.RawMessage) ([]provider.ChatMessage, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, fmt.Errorf("input is required")
@@ -62,11 +91,19 @@ func parseResponsesInput(raw json.RawMessage) ([]provider.ChatMessage, error) {
 	if json.Unmarshal(raw, &text) == nil {
 		return []provider.ChatMessage{{Role: "user", Content: text}}, nil
 	}
-	var msgs []provider.ChatMessage
+	var msgs []responsesInputMessage
 	if err := json.Unmarshal(raw, &msgs); err != nil {
 		return nil, err
 	}
-	return msgs, nil
+	result := make([]provider.ChatMessage, 0, len(msgs))
+	for _, m := range msgs {
+		cm, err := m.toChatMessage()
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, cm)
+	}
+	return result, nil
 }
 
 func emitResponsesEvent(w http.ResponseWriter, eventType string, data interface{}) {
