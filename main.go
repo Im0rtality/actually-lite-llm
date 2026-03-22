@@ -45,6 +45,7 @@ func main() {
 	h := handler.New(authenticator, rtr, providers, logger)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/models", h.Models)
 	mux.HandleFunc("POST /v1/chat/completions", h.ChatCompletions)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

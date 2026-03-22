@@ -27,6 +27,15 @@ func New(models map[string]config.ModelAlias, routing []config.RoutingRule) *Rou
 	}
 }
 
+// Aliases returns the names of all explicitly configured model aliases.
+func (r *Router) Aliases() []string {
+	names := make([]string, 0, len(r.aliases))
+	for name := range r.aliases {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Resolve maps a model name to a provider and upstream model name.
 func (r *Router) Resolve(model string) (Route, error) {
 	// Check alias map first
