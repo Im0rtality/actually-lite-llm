@@ -20,10 +20,10 @@ LiteLLM does what this does, but it weighs ~800MB at idle and can't track usage 
 ## Quick Start
 
 ```bash
-cp config.example.yaml config.yaml
-# edit config.yaml — add your provider API keys and virtual keys
+cp config.example.yaml config.local.yaml
+# edit config.local.yaml — add your provider API keys and virtual keys
 
-go run . -config config.yaml
+go run . -config config.local.yaml
 ```
 
 Test it:
