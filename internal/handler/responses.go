@@ -71,7 +71,7 @@ func parseResponsesInput(raw json.RawMessage) ([]provider.ChatMessage, error) {
 
 func emitResponsesEvent(w http.ResponseWriter, eventType string, data interface{}) {
 	b, _ := json.Marshal(data)
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, b)
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, b)
 }
 
 // responsesStreamAdapter wraps an http.ResponseWriter to translate
