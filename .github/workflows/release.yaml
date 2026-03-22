@@ -11,9 +11,24 @@ env:
   CHART: ghcr.io/im0rtality/charts/actually-lite-llm
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    needs: test
     permissions:
       contents: read
       packages: write
