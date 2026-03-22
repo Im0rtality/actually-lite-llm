@@ -1,257 +1,134 @@
 package provider
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-const anthropicVersion = "2023-06-01"
 const defaultMaxTokens = 4096
 
 type AnthropicProvider struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
+	client anthropicsdk.Client
 }
 
 func NewAnthropic(apiKey, baseURL string) *AnthropicProvider {
-	if baseURL == "" {
-		baseURL = "https://api.anthropic.com/v1"
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(&http.Client{Timeout: 120 * time.Second}),
 	}
-	return &AnthropicProvider{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 120 * time.Second},
+	if baseURL != "" {
+		// The Anthropic SDK appends /v1/... paths itself; strip a trailing /v1
+		// from the config base URL so we don't end up with /v1/v1/messages.
+		opts = append(opts, option.WithBaseURL(strings.TrimSuffix(baseURL, "/v1")))
 	}
+	return &AnthropicProvider{client: anthropicsdk.NewClient(opts...)}
 }
 
-// anthropicMessage is the format Anthropic expects.
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// anthropicRequest is the Anthropic messages API request body.
-type anthropicRequest struct {
-	Model         string             `json:"model"`
-	Messages      []anthropicMessage `json:"messages"`
-	System        string             `json:"system,omitempty"`
-	MaxTokens     int                `json:"max_tokens"`
-	Temperature   *float64           `json:"temperature,omitempty"`
-	Stream        bool               `json:"stream,omitempty"`
-	StopSequences []string           `json:"stop_sequences,omitempty"`
-	TopP          *float64           `json:"top_p,omitempty"`
-}
-
-type anthropicContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
-
-type anthropicResponse struct {
-	ID           string             `json:"id"`
-	Type         string             `json:"type"`
-	Role         string             `json:"role"`
-	Content      []anthropicContent `json:"content"`
-	Model        string             `json:"model"`
-	StopReason   string             `json:"stop_reason"`
-	StopSequence *string            `json:"stop_sequence"`
-	Usage        anthropicUsage     `json:"usage"`
-}
-
-// translateRequest converts an OpenAI request to Anthropic format.
-func translateRequest(req *ChatCompletionRequest, upstreamModel string) anthropicRequest {
-	var system string
-	var messages []anthropicMessage
+func buildAnthropicParams(req *ChatCompletionRequest, upstreamModel string) anthropicsdk.MessageNewParams {
+	var system []anthropicsdk.TextBlockParam
+	var messages []anthropicsdk.MessageParam
 
 	for _, m := range req.Messages {
-		if m.Role == "system" {
-			if system != "" {
-				system += "\n" + m.Content
-			} else {
-				system = m.Content
-			}
-		} else {
-			messages = append(messages, anthropicMessage{
-				Role:    m.Role,
-				Content: m.Content,
-			})
+		switch m.Role {
+		case "system":
+			system = append(system, anthropicsdk.TextBlockParam{Text: m.Content})
+		case "assistant":
+			messages = append(messages, anthropicsdk.NewAssistantMessage(anthropicsdk.NewTextBlock(m.Content)))
+		default:
+			messages = append(messages, anthropicsdk.NewUserMessage(anthropicsdk.NewTextBlock(m.Content)))
 		}
 	}
 
-	maxTokens := req.MaxTokens
+	maxTokens := int64(req.MaxTokens)
 	if maxTokens == 0 {
 		maxTokens = defaultMaxTokens
 	}
 
-	ar := anthropicRequest{
-		Model:       upstreamModel,
-		Messages:    messages,
-		System:      system,
-		MaxTokens:   maxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
+	params := anthropicsdk.MessageNewParams{
+		Model:     upstreamModel,
+		Messages:  messages,
+		MaxTokens: maxTokens,
+		System:    system,
 	}
-
+	if req.Temperature != nil {
+		params.Temperature = anthropicsdk.Float(*req.Temperature)
+	}
+	if req.TopP != nil {
+		params.TopP = anthropicsdk.Float(*req.TopP)
+	}
 	if len(req.Stop) > 0 {
-		ar.StopSequences = req.Stop
+		params.StopSequences = req.Stop
 	}
-
-	return ar
+	return params
 }
 
-// mapStopReason converts Anthropic stop reason to OpenAI finish reason.
-func mapStopReason(reason string) string {
-	switch reason {
-	case "end_turn":
+func anthropicToOpenAIUsage(u anthropicsdk.Usage) Usage {
+	return Usage{
+		PromptTokens:     int(u.InputTokens),
+		CompletionTokens: int(u.OutputTokens),
+		TotalTokens:      int(u.InputTokens + u.OutputTokens),
+	}
+}
+
+func anthropicStopReason(r anthropicsdk.StopReason) string {
+	switch r {
+	case anthropicsdk.StopReasonEndTurn:
 		return "stop"
-	case "max_tokens":
+	case anthropicsdk.StopReasonMaxTokens:
 		return "length"
-	case "stop_sequence":
+	case anthropicsdk.StopReasonStopSequence:
 		return "stop"
 	default:
-		return reason
+		return string(r)
 	}
 }
 
 func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatCompletionRequest, upstreamModel string, w http.ResponseWriter) (*Usage, error) {
-	ar := translateRequest(req, upstreamModel)
-	ar.Stream = false
-
-	data, err := json.Marshal(ar)
+	msg, err := p.client.Messages.New(ctx, buildAnthropicParams(req, upstreamModel))
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/messages", bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("x-api-key", p.apiKey)
-	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("upstream request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
-		_, _ = w.Write(respBody)
-		return nil, fmt.Errorf("upstream status %d", resp.StatusCode)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = fmt.Fprintf(w, `{"error":{"message":%q,"type":"upstream_error"}}`, err.Error())
+		return nil, fmt.Errorf("anthropic: %w", err)
 	}
 
-	var ar2 anthropicResponse
-	if err := json.Unmarshal(respBody, &ar2); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
-
-	// Concatenate text blocks
-	var sb strings.Builder
-	for _, block := range ar2.Content {
+	var content string
+	for _, block := range msg.Content {
 		if block.Type == "text" {
-			sb.WriteString(block.Text)
+			content += block.Text
 		}
 	}
 
-	openAIResp := ChatCompletionResponse{
-		ID:      ar2.ID,
+	usage := anthropicToOpenAIUsage(msg.Usage)
+	resp := ChatCompletionResponse{
+		ID:      msg.ID,
 		Object:  "chat.completion",
 		Created: time.Now().Unix(),
 		Model:   req.Model,
-		Choices: []ChatCompletionChoice{
-			{
-				Index: 0,
-				Message: ChatMessage{
-					Role:    "assistant",
-					Content: sb.String(),
-				},
-				FinishReason: mapStopReason(ar2.StopReason),
-			},
-		},
-		Usage: Usage{
-			PromptTokens:     ar2.Usage.InputTokens,
-			CompletionTokens: ar2.Usage.OutputTokens,
-			TotalTokens:      ar2.Usage.InputTokens + ar2.Usage.OutputTokens,
-		},
+		Choices: []ChatCompletionChoice{{
+			Index:        0,
+			Message:      ChatMessage{Role: "assistant", Content: content},
+			FinishReason: anthropicStopReason(msg.StopReason),
+		}},
+		Usage: usage,
 	}
 
-	out, err := json.Marshal(openAIResp)
-	if err != nil {
-		return nil, fmt.Errorf("marshal response: %w", err)
-	}
-
+	out, _ := json.Marshal(resp)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out)
-
-	return &openAIResp.Usage, nil
-}
-
-// Anthropic streaming event types
-type anthropicStreamEvent struct {
-	Type  string          `json:"type"`
-	Index int             `json:"index"`
-	Delta *anthropicDelta `json:"delta,omitempty"`
-	Usage *anthropicUsage `json:"usage,omitempty"`
-}
-
-type anthropicDelta struct {
-	Type       string `json:"type"`
-	Text       string `json:"text"`
-	StopReason string `json:"stop_reason,omitempty"`
+	return &usage, nil
 }
 
 func (p *AnthropicProvider) ChatStream(ctx context.Context, req *ChatCompletionRequest, upstreamModel string, w http.ResponseWriter, onFirstByte func()) error {
-	ar := translateRequest(req, upstreamModel)
-	ar.Stream = true
-
-	data, err := json.Marshal(ar)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/messages", bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	httpReq.Header.Set("x-api-key", p.apiKey)
-	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("upstream request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
-		_, _ = w.Write(body)
-		return fmt.Errorf("upstream status %d", resp.StatusCode)
-	}
+	stream := p.client.Messages.NewStreaming(ctx, buildAnthropicParams(req, upstreamModel))
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -260,90 +137,62 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req *ChatCompletionR
 
 	flusher, _ := w.(http.Flusher)
 	firstByte := false
+	streamID := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 
-	// Generate a stable ID for this stream
-	streamID := "chatcmpl-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	for stream.Next() {
+		event := stream.Current()
 
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		payload := strings.TrimPrefix(line, "data: ")
-		if payload == "[DONE]" {
-			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-			if flusher != nil {
-				flusher.Flush()
-			}
-			break
-		}
-
-		var event anthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			continue
-		}
-
-		// Translate content_block_delta to OpenAI SSE chunk
-		if event.Type == "content_block_delta" && event.Delta != nil && event.Delta.Type == "text_delta" {
-			chunk := map[string]interface{}{
-				"id":      streamID,
-				"object":  "chat.completion.chunk",
-				"created": time.Now().Unix(),
-				"model":   req.Model,
-				"choices": []map[string]interface{}{
-					{
-						"index": 0,
-						"delta": map[string]string{
-							"content": event.Delta.Text,
-						},
-						"finish_reason": nil,
-					},
-				},
-			}
-			chunkData, err := json.Marshal(chunk)
-			if err != nil {
-				continue
-			}
-
-			if !firstByte {
-				firstByte = true
-				onFirstByte()
-			}
-
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", chunkData)
-			if flusher != nil {
-				flusher.Flush()
-			}
-		} else if event.Type == "message_delta" && event.Delta != nil {
-			// Final message chunk with finish_reason
-			chunk := map[string]interface{}{
-				"id":      streamID,
-				"object":  "chat.completion.chunk",
-				"created": time.Now().Unix(),
-				"model":   req.Model,
-				"choices": []map[string]interface{}{
-					{
+		switch event.Type {
+		case "content_block_delta":
+			if event.Delta.Type == "text_delta" {
+				if !firstByte {
+					firstByte = true
+					onFirstByte()
+				}
+				chunk := map[string]any{
+					"id":      streamID,
+					"object":  "chat.completion.chunk",
+					"created": time.Now().Unix(),
+					"model":   req.Model,
+					"choices": []map[string]any{{
 						"index":         0,
-						"delta":         map[string]string{},
-						"finish_reason": mapStopReason(event.Delta.StopReason),
-					},
-				},
+						"delta":         map[string]string{"content": event.Delta.Text},
+						"finish_reason": nil,
+					}},
+				}
+				data, _ := json.Marshal(chunk)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+				if flusher != nil {
+					flusher.Flush()
+				}
 			}
-			chunkData, err := json.Marshal(chunk)
-			if err != nil {
-				continue
+		case "message_delta":
+			chunk := map[string]any{
+				"id":      streamID,
+				"object":  "chat.completion.chunk",
+				"created": time.Now().Unix(),
+				"model":   req.Model,
+				"choices": []map[string]any{{
+					"index":         0,
+					"delta":         map[string]string{},
+					"finish_reason": anthropicStopReason(event.Delta.StopReason),
+				}},
 			}
-
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", chunkData)
+			data, _ := json.Marshal(chunk)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			if flusher != nil {
 				flusher.Flush()
 			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read stream: %w", err)
+	if err := stream.Err(); err != nil {
+		return fmt.Errorf("anthropic stream: %w", err)
+	}
+
+	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+	if flusher != nil {
+		flusher.Flush()
 	}
 	return nil
 }

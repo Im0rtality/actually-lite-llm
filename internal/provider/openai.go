@@ -1,106 +1,107 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
+
+	openaisdk "github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 )
 
 type OpenAIProvider struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
+	client *openaisdk.Client
 }
 
 func NewOpenAI(apiKey, baseURL string) *OpenAIProvider {
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(&http.Client{Timeout: 120 * time.Second}),
 	}
-	return &OpenAIProvider{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 120 * time.Second},
+	if baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
 	}
+	c := openaisdk.NewClient(opts...)
+	return &OpenAIProvider{client: &c}
+}
+
+func toOpenAIMessages(msgs []ChatMessage) []openaisdk.ChatCompletionMessageParamUnion {
+	result := make([]openaisdk.ChatCompletionMessageParamUnion, 0, len(msgs))
+	for _, m := range msgs {
+		switch m.Role {
+		case "system":
+			result = append(result, openaisdk.SystemMessage(m.Content))
+		case "assistant":
+			result = append(result, openaisdk.AssistantMessage(m.Content))
+		default:
+			result = append(result, openaisdk.UserMessage(m.Content))
+		}
+	}
+	return result
+}
+
+func buildOpenAIParams(req *ChatCompletionRequest, upstreamModel string) openaisdk.ChatCompletionNewParams {
+	params := openaisdk.ChatCompletionNewParams{
+		Model:    openaisdk.ChatModel(upstreamModel),
+		Messages: toOpenAIMessages(req.Messages),
+	}
+	if req.MaxTokens > 0 {
+		params.MaxTokens = openaisdk.Int(int64(req.MaxTokens))
+	}
+	if req.Temperature != nil {
+		params.Temperature = openaisdk.Float(*req.Temperature)
+	}
+	if req.TopP != nil {
+		params.TopP = openaisdk.Float(*req.TopP)
+	}
+	if len(req.Stop) > 0 {
+		params.Stop = openaisdk.ChatCompletionNewParamsStopUnion{
+			OfStringArray: req.Stop,
+		}
+	}
+	return params
 }
 
 func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatCompletionRequest, upstreamModel string, w http.ResponseWriter) (*Usage, error) {
-	body := *req
-	body.Model = upstreamModel
-	body.Stream = false
-
-	data, err := json.Marshal(body)
+	completion, err := p.client.Chat.Completions.New(ctx, buildOpenAIParams(req, upstreamModel))
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = fmt.Fprintf(w, `{"error":{"message":%q,"type":"upstream_error"}}`, err.Error())
+		return nil, fmt.Errorf("openai: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return nil, err
+	resp := ChatCompletionResponse{
+		ID:      completion.ID,
+		Object:  string(completion.Object),
+		Created: completion.Created,
+		Model:   req.Model,
+		Usage: Usage{
+			PromptTokens:     int(completion.Usage.PromptTokens),
+			CompletionTokens: int(completion.Usage.CompletionTokens),
+			TotalTokens:      int(completion.Usage.TotalTokens),
+		},
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("upstream request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+	for _, c := range completion.Choices {
+		resp.Choices = append(resp.Choices, ChatCompletionChoice{
+			Index:        int(c.Index),
+			Message:      ChatMessage{Role: string(c.Message.Role), Content: c.Message.Content},
+			FinishReason: string(c.FinishReason),
+		})
 	}
 
+	out, _ := json.Marshal(resp)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(respBody)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("upstream status %d", resp.StatusCode)
-	}
-
-	var result ChatCompletionResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
-
-	return &result.Usage, nil
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out)
+	return &resp.Usage, nil
 }
 
 func (p *OpenAIProvider) ChatStream(ctx context.Context, req *ChatCompletionRequest, upstreamModel string, w http.ResponseWriter, onFirstByte func()) error {
-	body := *req
-	body.Model = upstreamModel
-	body.Stream = true
-
-	data, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("upstream request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
-		_, _ = w.Write(body)
-		return fmt.Errorf("upstream status %d", resp.StatusCode)
-	}
+	stream := p.client.Chat.Completions.NewStreaming(ctx, buildOpenAIParams(req, upstreamModel))
+	defer stream.Close()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -110,28 +111,29 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req *ChatCompletionRequ
 	flusher, _ := w.(http.Flusher)
 	firstByte := false
 
-	buf := make([]byte, 4096)
-	for {
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			if !firstByte {
-				firstByte = true
-				onFirstByte()
-			}
-			_, writeErr := w.Write(buf[:n])
-			if writeErr != nil {
-				return nil // client disconnected
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
+	for stream.Next() {
+		chunk := stream.Current()
+		if !firstByte {
+			firstByte = true
+			onFirstByte()
 		}
-		if readErr == io.EOF {
-			break
+		data, err := json.Marshal(chunk)
+		if err != nil {
+			continue
 		}
-		if readErr != nil {
-			return fmt.Errorf("read stream: %w", readErr)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		if flusher != nil {
+			flusher.Flush()
 		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return fmt.Errorf("openai stream: %w", err)
+	}
+
+	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+	if flusher != nil {
+		flusher.Flush()
 	}
 	return nil
 }
