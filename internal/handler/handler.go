@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/laurynas/actually-lite-llm/internal/auth"
-	"github.com/laurynas/actually-lite-llm/internal/metrics"
-	"github.com/laurynas/actually-lite-llm/internal/provider"
-	"github.com/laurynas/actually-lite-llm/internal/router"
+	"github.com/im0rtality/actually-lite-llm/internal/auth"
+	"github.com/im0rtality/actually-lite-llm/internal/metrics"
+	"github.com/im0rtality/actually-lite-llm/internal/provider"
+	"github.com/im0rtality/actually-lite-llm/internal/router"
 )
 
 type Providers map[string]provider.Provider
@@ -52,6 +52,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse request
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB
 	var req provider.ChatCompletionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -88,9 +89,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
 
 	if req.Stream {
-		firstByteTime := time.Time{}
 		onFirstByte := func() {
-			firstByteTime = time.Now()
 			metrics.StreamFirstByte.WithLabelValues(vk, pname, model).Observe(time.Since(start).Seconds())
 		}
 
@@ -99,7 +98,6 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 			metrics.ProviderErrors.WithLabelValues(pname, "stream_error").Inc()
 			h.logger.Error("stream error", "error", err, "request_id", reqID)
 		}
-		_ = firstByteTime
 
 		metrics.RequestDuration.WithLabelValues(vk, pname, model, "true").Observe(time.Since(start).Seconds())
 		if err != nil {

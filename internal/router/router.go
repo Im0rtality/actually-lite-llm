@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/laurynas/actually-lite-llm/internal/config"
+	"github.com/im0rtality/actually-lite-llm/internal/config"
 )
 
 type Route struct {

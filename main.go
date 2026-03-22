@@ -12,11 +12,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/laurynas/actually-lite-llm/internal/auth"
-	"github.com/laurynas/actually-lite-llm/internal/config"
-	"github.com/laurynas/actually-lite-llm/internal/handler"
-	"github.com/laurynas/actually-lite-llm/internal/provider"
-	"github.com/laurynas/actually-lite-llm/internal/router"
+	"github.com/im0rtality/actually-lite-llm/internal/auth"
+	"github.com/im0rtality/actually-lite-llm/internal/config"
+	"github.com/im0rtality/actually-lite-llm/internal/handler"
+	"github.com/im0rtality/actually-lite-llm/internal/provider"
+	"github.com/im0rtality/actually-lite-llm/internal/router"
 )
 
 func main() {

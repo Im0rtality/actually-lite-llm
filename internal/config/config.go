@@ -73,10 +73,12 @@ func setDefaults(cfg *Config) {
 	}
 }
 
+const minKeyLength = 16
+
 func validate(cfg *Config) error {
 	for i, k := range cfg.APIKeys {
-		if k.Key == "" {
-			return fmt.Errorf("api_keys[%d]: key is required", i)
+		if len(k.Key) < minKeyLength {
+			return fmt.Errorf("api_keys[%d]: key must be at least %d characters (got %d)", i, minKeyLength, len(k.Key))
 		}
 		if k.App == "" {
 			return fmt.Errorf("api_keys[%d]: app is required", i)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,10 +12,10 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/laurynas/actually-lite-llm/internal/auth"
-	"github.com/laurynas/actually-lite-llm/internal/config"
-	"github.com/laurynas/actually-lite-llm/internal/provider"
-	"github.com/laurynas/actually-lite-llm/internal/router"
+	"github.com/im0rtality/actually-lite-llm/internal/auth"
+	"github.com/im0rtality/actually-lite-llm/internal/config"
+	"github.com/im0rtality/actually-lite-llm/internal/provider"
+	"github.com/im0rtality/actually-lite-llm/internal/router"
 )
 
 // stubProvider implements provider.Provider for testing.
@@ -51,11 +52,16 @@ func (s *stubProvider) ChatStream(_ context.Context, _ *provider.ChatCompletionR
 	return s.err
 }
 
+const (
+	goodKey       = "sk-test-good-key-1234"
+	restrictedKey = "sk-test-restricted-01"
+)
+
 func makeHandler() *Handler {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	a := auth.New([]config.APIKey{
-		{Key: "good-key", App: "testapp", AllowedModels: []string{"*"}},
-		{Key: "restricted", App: "restricted-app", AllowedModels: []string{"gpt-4o"}},
+		{Key: goodKey, App: "testapp", AllowedModels: []string{"*"}},
+		{Key: restrictedKey, App: "restricted-app", AllowedModels: []string{"gpt-4o"}},
 	})
 	r := router.New(
 		map[string]config.ModelAlias{
@@ -69,16 +75,23 @@ func makeHandler() *Handler {
 	return New(a, r, p, logger)
 }
 
-func TestChatCompletions_Unauthorized(t *testing.T) {
-	h := makeHandler()
-	body, _ := json.Marshal(map[string]interface{}{
-		"model":    "gpt-4o",
-		"messages": []map[string]string{{"role": "user", "content": "hi"}},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer bad-key")
+func post(h *Handler, body interface{}, authKey string) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(b))
+	if authKey != "" {
+		req.Header.Set("Authorization", "Bearer "+authKey)
+	}
 	w := httptest.NewRecorder()
 	h.ChatCompletions(w, req)
+	return w
+}
+
+func TestChatCompletions_Unauthorized(t *testing.T) {
+	h := makeHandler()
+	w := post(h, map[string]interface{}{
+		"model":    "gpt-4o",
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}, "bad-key")
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
@@ -86,38 +99,64 @@ func TestChatCompletions_Unauthorized(t *testing.T) {
 
 func TestChatCompletions_Forbidden(t *testing.T) {
 	h := makeHandler()
-	body, _ := json.Marshal(map[string]interface{}{
-		"model":    "gpt-4o",
-		"messages": []map[string]string{{"role": "user", "content": "hi"}},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	// restricted key only allows gpt-4o... but we ask for gpt-4o which is allowed
-	// Let's test with an actually disallowed model
-	body2, _ := json.Marshal(map[string]interface{}{
+	w := post(h, map[string]interface{}{
 		"model":    "claude-sonnet",
 		"messages": []map[string]string{{"role": "user", "content": "hi"}},
-	})
-	req2 := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body2))
-	req2.Header.Set("Authorization", "Bearer restricted")
-	w2 := httptest.NewRecorder()
-	h.ChatCompletions(w2, req2)
-	if w2.Code != http.StatusForbidden {
-		t.Errorf("expected 403, got %d", w2.Code)
+	}, restrictedKey)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", w.Code)
 	}
-	_ = req
-	_ = body
+}
+
+func TestChatCompletions_UnknownModel(t *testing.T) {
+	h := makeHandler()
+	w := post(h, map[string]interface{}{
+		"model":    "unknown-model",
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}, goodKey)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestChatCompletions_BadBody(t *testing.T) {
+	h := makeHandler()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Authorization", "Bearer "+goodKey)
+	w := httptest.NewRecorder()
+	h.ChatCompletions(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestChatCompletions_ProviderError(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	a := auth.New([]config.APIKey{
+		{Key: goodKey, App: "testapp", AllowedModels: []string{"*"}},
+	})
+	r := router.New(map[string]config.ModelAlias{
+		"gpt-4o": {Provider: "openai", Model: "gpt-4o"},
+	}, nil)
+	p := Providers{
+		"openai": &stubProvider{err: errors.New("upstream down"), usage: &provider.Usage{}},
+	}
+	h := New(a, r, p, logger)
+	w := post(h, map[string]interface{}{
+		"model":    "gpt-4o",
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}, goodKey)
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", w.Code)
+	}
 }
 
 func TestChatCompletions_OK(t *testing.T) {
 	h := makeHandler()
-	body, _ := json.Marshal(map[string]interface{}{
+	w := post(h, map[string]interface{}{
 		"model":    "gpt-4o",
 		"messages": []map[string]string{{"role": "user", "content": "hello"}},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer good-key")
-	w := httptest.NewRecorder()
-	h.ChatCompletions(w, req)
+	}, goodKey)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -125,15 +164,11 @@ func TestChatCompletions_OK(t *testing.T) {
 
 func TestChatCompletions_Stream(t *testing.T) {
 	h := makeHandler()
-	body, _ := json.Marshal(map[string]interface{}{
+	w := post(h, map[string]interface{}{
 		"model":    "gpt-4o",
 		"messages": []map[string]string{{"role": "user", "content": "hello"}},
 		"stream":   true,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer good-key")
-	w := httptest.NewRecorder()
-	h.ChatCompletions(w, req)
+	}, goodKey)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}

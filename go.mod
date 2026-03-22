@@ -1,4 +1,4 @@
-module github.com/laurynas/actually-lite-llm
+module github.com/im0rtality/actually-lite-llm
 
 go 1.24.4
 

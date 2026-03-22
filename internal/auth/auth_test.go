@@ -3,7 +3,7 @@ package auth
 import (
 	"testing"
 
-	"github.com/laurynas/actually-lite-llm/internal/config"
+	"github.com/im0rtality/actually-lite-llm/internal/config"
 )
 
 func TestLookup(t *testing.T) {

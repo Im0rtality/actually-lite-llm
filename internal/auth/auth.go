@@ -3,7 +3,7 @@ package auth
 import (
 	"strings"
 
-	"github.com/laurynas/actually-lite-llm/internal/config"
+	"github.com/im0rtality/actually-lite-llm/internal/config"
 )
 
 type KeyInfo struct {
