@@ -13,8 +13,10 @@ type ProviderConfig struct {
 }
 
 type ModelAlias struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
+	Provider              string  `yaml:"provider"`
+	Model                 string  `yaml:"model"`
+	CostPerMillionInput   float64 `yaml:"cost_per_million_input"`
+	CostPerMillionOutput  float64 `yaml:"cost_per_million_output"`
 }
 
 type RoutingRule struct {

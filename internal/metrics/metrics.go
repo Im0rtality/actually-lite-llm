@@ -32,4 +32,9 @@ var (
 		Name: "llm_provider_errors_total",
 		Help: "Total provider errors.",
 	}, []string{"provider", "error_type"})
+
+	CostTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "llm_cost_dollars_total",
+		Help: "Estimated cost in US dollars based on config-defined per-model pricing. Only populated for non-streaming requests and models with pricing configured.",
+	}, []string{"app", "provider", "model"})
 )

@@ -118,6 +118,11 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		if usage != nil {
 			metrics.TokensTotal.WithLabelValues(app, pname, model, "prompt").Add(float64(usage.PromptTokens))
 			metrics.TokensTotal.WithLabelValues(app, pname, model, "completion").Add(float64(usage.CompletionTokens))
+			if route.CostPerMillionInput > 0 || route.CostPerMillionOutput > 0 {
+				cost := float64(usage.PromptTokens)*route.CostPerMillionInput/1_000_000 +
+					float64(usage.CompletionTokens)*route.CostPerMillionOutput/1_000_000
+				metrics.CostTotal.WithLabelValues(app, pname, model).Add(cost)
+			}
 		}
 		metrics.RequestDuration.WithLabelValues(app, pname, model, "false").Observe(time.Since(start).Seconds())
 		metrics.RequestsTotal.WithLabelValues(app, pname, model, strconv.Itoa(statusCode)).Inc()

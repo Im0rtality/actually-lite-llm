@@ -9,10 +9,22 @@ providers:
     base_url: "https://api.anthropic.com/v1" # optional, has default
 
 models:
-  # alias → upstream model + provider
-  "gpt-4o": { provider: "openai", model: "gpt-4o" }
-  "claude-sonnet": { provider: "anthropic", model: "claude-sonnet-4-20250514" }
-  "claude-haiku": { provider: "anthropic", model: "claude-haiku-4-5-20251001" }
+  # alias → upstream model + provider + optional pricing (USD per million tokens)
+  "gpt-4o":
+    provider: "openai"
+    model: "gpt-4o"
+    cost_per_million_input: 2.50
+    cost_per_million_output: 10.00
+  "claude-sonnet":
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+    cost_per_million_input: 3.00
+    cost_per_million_output: 15.00
+  "claude-haiku":
+    provider: "anthropic"
+    model: "claude-haiku-4-5-20251001"
+    cost_per_million_input: 0.80
+    cost_per_million_output: 4.00
 
 routing:
   # Prefix-based fallback for models not in the alias map

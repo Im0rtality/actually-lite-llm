@@ -8,8 +8,10 @@ import (
 )
 
 type Route struct {
-	Provider     string
-	UpstreamModel string
+	Provider              string
+	UpstreamModel         string
+	CostPerMillionInput   float64
+	CostPerMillionOutput  float64
 }
 
 type Router struct {
@@ -29,8 +31,10 @@ func (r *Router) Resolve(model string) (Route, error) {
 	// Check alias map first
 	if alias, ok := r.aliases[model]; ok {
 		return Route{
-			Provider:     alias.Provider,
-			UpstreamModel: alias.Model,
+			Provider:             alias.Provider,
+			UpstreamModel:        alias.Model,
+			CostPerMillionInput:  alias.CostPerMillionInput,
+			CostPerMillionOutput: alias.CostPerMillionOutput,
 		}, nil
 	}
 
